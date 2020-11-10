@@ -12,8 +12,8 @@ class Instructions
     puts "Feedback is given as symbols:\n\n"
     puts '-- ☂  indicates the existence of a correct number but in the wrong position.'
     puts "-- ☀  indicates a correct number that's in the correct position.\n\n"
-    puts 'Feedback is not ordered. A guess of => 4125 with feedback '\
-      "=> ☀ ☂  does not mean 4 is given ☀ and 1 is given ☂ \n\n"
+    puts 'Feedback is not ordered. A guess of 4125 with feedback '\
+      "☀ ☂  does not mean 4 is given ☀  and 1 is given ☂ \n\n"
     puts 'Scoring: 1 point is given to the codemaker for each '\
       'guess the codebreaker makes. An additional point is awarded '\
       'if the codebreaker is unable to guess the code in 12 turns.'
@@ -85,10 +85,9 @@ class Board
 
   def format(element)
     if element.class == Integer && element < 10
-      element = '0' + element.to_s
+      '0' + element.to_s
     else
-      element = element.to_s.gsub(/[",\[\]]/, '"' => '',
-        ',' => '', '[' => '', ']' => '')
+      element.to_s.gsub(/[",\[\]]/, '"': '', ',': '', '[': '', ']': '')
     end
   end
 end
@@ -131,17 +130,15 @@ class Codemaker
   end
 end
 
-# defines an attempt to break the code
-class Codebreaker
-  attr_reader :guess, :feedback, :turn_num
-  def initialize(breaker, feedback, turn_num)
-    @feedback = feedback
-    @turn_num = turn_num
-    @guess = player_attempt if breaker == 'player'
-    @guess = computer_attempt if breaker == 'computer'
+# defines the players attempt to break the code
+class PlayerBreaker
+  attr_reader :guess
+
+  def initialize
+    @guess = attempt
   end
 
-  def player_attempt
+  def attempt
     puts "\n\nGuess the code:"
     loop do
       guess = format(input)
@@ -149,14 +146,6 @@ class Codebreaker
 
       puts 'Enter a 4 digit code containing numbers 1-6.'
     end
-  end
-
-  # TO-DO: give computer intelligence
-  # computer now has access to feedback and turn_num
-  def computer_attempt
-    code = []
-    4.times { code << rand(1..6) }
-    code
   end
 
   def input
@@ -169,6 +158,73 @@ class Codebreaker
 
   def valid?(attempt)
     attempt.length == 4 && attempt.all?(1..6)
+  end
+end
+
+# defines the computer's attempt to break the code
+class ComputerBreaker
+  @included_nums = []
+  @permutations = nil
+  @guesses = []
+
+  class << self
+    attr_accessor :included_nums, :permutations, :guesses
+  end
+
+  attr_reader :turn_number, :feedback, :guess
+
+  def initialize(feedback, turn_number)
+    @feedback = feedback
+    @turn_number = turn_number
+    @guess = []
+    take_turn
+  end
+
+  def self.reset_class_vars
+    self.included_nums = []
+    self.permutations = nil
+    self.guesses = []
+  end
+
+  def take_turn
+    # first find the correct four digits.
+    if ComputerBreaker.included_nums.length < 4
+      include_nums if feedback
+      find_nums
+    end
+    return unless ComputerBreaker.included_nums.length == 4
+
+    find_permutations
+    eliminate_previous_guesses
+    @guess = random_permutation
+    ComputerBreaker.guesses << guess
+  end
+
+  def find_nums
+    if turn_number < 6
+      4.times { guess << turn_number }
+    else
+      (4 - ComputerBreaker.included_nums.length).times { ComputerBreaker.included_nums << 6 }
+    end
+  end
+
+  def include_nums
+    # - 1 because it's feedback from the previous turn.
+    feedback.length.times { ComputerBreaker.included_nums << turn_number - 1 }
+  end
+
+  def find_permutations
+    ComputerBreaker.permutations = ComputerBreaker.included_nums.permutation(4).to_a
+  end
+
+  def eliminate_previous_guesses
+    ComputerBreaker.guesses.each do |guess|
+      ComputerBreaker.permutations.delete(guess)
+    end
+  end
+
+  def random_permutation
+    ComputerBreaker.permutations.sample
   end
 end
 
@@ -188,7 +244,7 @@ class Feedback
       if secret_code[index] == attempt[index]
         add_feedback('☀ ')
       elsif attempt.include?(num)
-        next unless secret_code[index - 1] != secret_code[index]
+        next unless secret_code[0..index].include?(num)
 
         add_feedback('☂ ')
       end
@@ -212,7 +268,7 @@ class Game
     attr_accessor :round_number, :player_score, :computer_score, :player_position
   end
 
-  attr_reader :board, :maker, :breaker, :feedback, :player
+  attr_reader :board, :maker, :feedback, :player, :breaker
   attr_accessor :turn_number
 
   def initialize(player)
@@ -251,22 +307,25 @@ class Game
     @maker = Codemaker.new(whos_maker)
     loop do
       @turn_number += 1
-      @breaker = Codebreaker.new(whos_breaker, feedback&.feedback, @turn_number)
+      initialize_breaker(whos_breaker)
       @feedback = Feedback.new(breaker.guess, maker.secret_code)
       board.update(turn_number, breaker.guess, feedback.feedback)
       board.display if whos_breaker == 'player'
       next unless round_over?
 
-      board.display if whos_breaker == 'computer'
       award_points(point_reciever, turn_number)
-      display_round_result
+      display_round_result(whos_breaker)
       break
     end
   end
 
-  def display_round_result
-    puts "\n\nNailed it!" if code_cracked?
-    puts "\n\nThe code is: #{maker.secret_code}" if turn_number == 12
+  def initialize_breaker(whos_breaker)
+    if whos_breaker == 'player'
+      @breaker = PlayerBreaker.new
+    elsif whos_breaker == 'computer'
+      ComputerBreaker.reset_class_vars
+      @breaker = ComputerBreaker.new(feedback&.feedback, turn_number)
+    end
   end
 
   def code_cracked?
@@ -284,6 +343,22 @@ class Game
     else
       Game.computer_score += turn_num
       Game.computer_score += 1 if turn_num == 12 && code_cracked? == false
+    end
+  end
+
+  def display_round_result(whos_breaker)
+    if whos_breaker == 'player'
+      if turn_number == 12 && !code_cracked?
+        puts "\n\nThe code is: #{maker.secret_code}"
+      else
+        puts "\n\nNailed it!"
+      end
+    elsif whos_breaker == 'computer'
+      if turn_number == 12 && !code_cracked?
+        puts "\n\n**The computer wasn't able to guess your code.**"
+      else
+        puts "\n\n**The computer guessed your code on turn number #{turn_number}**"
+      end
     end
   end
 end
